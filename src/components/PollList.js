@@ -20,7 +20,7 @@ export default function PollList() {
     if (!uid) navigate("/login");
   }, [uid, navigate]);
 
-  // Fetch polls from Firestore
+  // Fetch polls in real time
   useEffect(() => {
     const unsub = onSnapshot(collection(db, "polls"), (snap) => {
       const arr = snap.docs.map((d) => ({
@@ -36,14 +36,14 @@ export default function PollList() {
     return () => unsub();
   }, []);
 
-  // Vote logic
+  // Voting logic + change vote logic
   const vote = async (poll, optionIndex) => {
     const voters = poll.voters || [];
     const previous = voters.find((v) => v.uid === uid);
 
     const updatedOptions = poll.options.map((o) => ({ ...o }));
 
-    // Remove old vote
+    // Remove previous vote if exists
     if (previous) {
       updatedOptions[previous.choice].votes =
         Math.max(0, updatedOptions[previous.choice].votes - 1);
@@ -53,7 +53,7 @@ export default function PollList() {
     updatedOptions[optionIndex].votes =
       (updatedOptions[optionIndex].votes || 0) + 1;
 
-    // Update voter list
+    // Update voters array
     const updatedVoters = previous
       ? voters.map((v) =>
           v.uid === uid ? { uid, username, choice: optionIndex } : v
@@ -73,6 +73,27 @@ export default function PollList() {
     await deleteDoc(doc(db, "polls", pollId));
   };
 
+  // Reset vote (Change Vote)
+  const changeVote = async (poll) => {
+    const voters = poll.voters || [];
+    const previous = voters.find((v) => v.uid === uid);
+
+    if (!previous) return; // failsafe
+
+    const updatedOptions = poll.options.map((o) => ({ ...o }));
+    updatedOptions[previous.choice].votes = Math.max(
+      0,
+      updatedOptions[previous.choice].votes - 1
+    );
+
+    const updatedVoters = voters.filter((v) => v.uid !== uid);
+
+    await updateDoc(doc(db, "polls", poll.id), {
+      options: updatedOptions,
+      voters: updatedVoters
+    });
+  };
+
   return (
     <div className="space-y-6 mt-6">
       {polls.length === 0 && (
@@ -84,7 +105,6 @@ export default function PollList() {
           (sum, o) => sum + (o.votes || 0),
           0
         );
-
         const myVote = poll.voters?.find((v) => v.uid === uid);
 
         return (
@@ -103,7 +123,6 @@ export default function PollList() {
                 </p>
               </div>
 
-              {/* Owner Controls */}
               {poll.ownerId === uid && (
                 <div className="flex items-center space-x-2">
                   <Link
@@ -121,8 +140,8 @@ export default function PollList() {
                   </Link>
 
                   <button
-                    onClick={() => confirmDelete(poll.id)}
                     className="btn bg-red-500 text-white px-3 py-1"
+                    onClick={() => confirmDelete(poll.id)}
                   >
                     Delete
                   </button>
@@ -130,52 +149,62 @@ export default function PollList() {
               )}
             </div>
 
-            {/* Voting Section */}
+            {/* Voting / Results */}
             <div className="space-y-4">
               {!myVote ? (
-                // BEFORE VOTING → Only show option text (no votes)
+                // BEFORE voting → only options
                 poll.options.map((opt, i) => (
                   <button
                     key={i}
-                    className="w-full btn bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-left"
                     onClick={() => vote(poll, i)}
+                    className="w-full btn bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-left"
                   >
                     {opt.text}
                   </button>
                 ))
               ) : (
-                // AFTER VOTING → Show bars + votes + percentages
-                poll.options.map((opt, i) => {
-                  const votes = opt.votes || 0;
-                  const pct =
-                    totalVotes === 0
-                      ? 0
-                      : ((votes / totalVotes) * 100).toFixed(1);
+                <>
+                  {/* AFTER voting → show bars, percentages, votes */}
+                  {poll.options.map((opt, i) => {
+                    const votes = opt.votes || 0;
+                    const pct =
+                      totalVotes === 0
+                        ? 0
+                        : ((votes / totalVotes) * 100).toFixed(1);
 
-                  return (
-                    <div key={i}>
-                      <div className="flex justify-between text-sm mb-1">
-                        <span>{opt.text}</span>
-                        <span>
-                          {votes} • {pct}%
-                        </span>
+                    return (
+                      <div key={i} className="mb-3">
+                        <div className="flex justify-between text-sm mb-1">
+                          <span>{opt.text}</span>
+                          <span>
+                            {votes} • {pct}%
+                          </span>
+                        </div>
+
+                        <div className="w-full bg-gray-300 dark:bg-gray-700 h-3 rounded">
+                          <div
+                            className="bg-brand-500 h-3 rounded"
+                            style={{ width: `${pct}%` }}
+                          ></div>
+                        </div>
+
+                        {myVote.choice === i && (
+                          <p className="text-green-500 text-sm mt-1">
+                            ✔ You voted
+                          </p>
+                        )}
                       </div>
+                    );
+                  })}
 
-                      <div className="w-full bg-gray-300 dark:bg-gray-700 h-3 rounded">
-                        <div
-                          className="bg-brand-500 h-3 rounded"
-                          style={{ width: `${pct}%` }}
-                        ></div>
-                      </div>
-
-                      {myVote.choice === i && (
-                        <p className="text-green-500 text-sm mt-1">
-                          ✔ You voted
-                        </p>
-                      )}
-                    </div>
-                  );
-                })
+                  {/* Change Vote Button */}
+                  <button
+                    onClick={() => changeVote(poll)}
+                    className="btn mt-4 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-900 dark:text-gray-100"
+                  >
+                    Change Vote
+                  </button>
+                </>
               )}
             </div>
           </div>
